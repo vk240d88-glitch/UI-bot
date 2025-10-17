@@ -1,0 +1,233 @@
+# settings.py - COMPLETE FIXED VERSION
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+                             QLabel, QComboBox, QSpinBox, QDoubleSpinBox, 
+                             QCheckBox, QGroupBox, QPushButton, QFrame,
+                             QScrollArea, QListWidget, QListWidgetItem)
+from PyQt5.QtCore import Qt
+
+class SettingsWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.selected_pairs = []
+        self.init_ui()
+        
+    def init_ui(self):
+        # Основной layout с прокруткой
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
+        content_widget = QWidget()
+        self.layout = QVBoxLayout(content_widget)
+        self.layout.setSpacing(25)
+        self.layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Выбор торговых пар
+        self.create_pair_selection()
+        
+        # Параметры торговли
+        self.create_trading_settings()
+        
+        # Управление данными
+        self.create_data_management()
+        
+        # Кнопки сохранения
+        self.create_action_buttons()
+        
+        scroll.setWidget(content_widget)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.addWidget(scroll)
+        
+    def create_pair_selection(self):
+        group = QGroupBox("📊 Выбор Торговых Пар (макс. 10)")
+        group_layout = QVBoxLayout(group)
+        
+        info_label = QLabel("Выберите криптовалютные пары для торговли:")
+        info_label.setStyleSheet("color: #B0B0B0; font-size: 14px; margin-bottom: 10px;")
+        
+        # Список доступных пар
+        self.pairs_list = QListWidget()
+        
+        available_pairs = [
+            "BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", 
+            "BNB/USDT:USDT", "XRP/USDT:USDT", "ADA/USDT:USDT",
+            "AVAX/USDT:USDT", "DOGE/USDT:USDT", "DOT/USDT:USDT", 
+            "LINK/USDT:USDT", "MATIC/USDT:USDT", "LTC/USDT:USDT",
+            "ATOM/USDT:USDT", "ETC/USDT:USDT", "BCH/USDT:USDT",
+            "FIL/USDT:USDT", "NEAR/USDT:USDT", "ALGO/USDT:USDT"
+        ]
+        
+        for pair in available_pairs:
+            item = QListWidgetItem(pair)
+            item.setCheckState(Qt.Unchecked)
+            self.pairs_list.addItem(item)
+        
+        self.pairs_list.itemChanged.connect(self.update_selected_pairs)
+        
+        # Статус выбора
+        self.selection_status = QLabel("Выбрано пар: 0/10")
+        self.selection_status.setStyleSheet("color: #56ABFF; font-weight: 600; font-size: 14px;")
+        
+        group_layout.addWidget(info_label)
+        group_layout.addWidget(self.pairs_list)
+        group_layout.addWidget(self.selection_status)
+        
+        self.layout.addWidget(group)
+        
+    def create_trading_settings(self):
+        group = QGroupBox("⚙️ Основные Параметры Торговли")
+        group_layout = QVBoxLayout(group)
+        
+        form_layout = QFormLayout()
+        form_layout.setLabelAlignment(Qt.AlignRight)
+        form_layout.setVerticalSpacing(15)
+        form_layout.setHorizontalSpacing(20)
+        
+        # Размер позиции
+        self.position_size_spin = QDoubleSpinBox()
+        self.position_size_spin.setRange(5, 50)
+        self.position_size_spin.setValue(15)
+        self.position_size_spin.setSuffix("% от депозита")
+        self.position_size_spin.setSingleStep(1)
+        
+        # Плечо
+        self.leverage_spin = QSpinBox()
+        self.leverage_spin.setRange(1, 20)
+        self.leverage_spin.setValue(5)
+        self.leverage_spin.setSuffix("x")
+        
+        # Интервал анализа
+        self.analysis_interval_combo = QComboBox()
+        self.analysis_interval_combo.addItems([
+            "15 минут",
+            "30 минут", 
+            "1 час",
+            "2 часа"
+        ])
+        self.analysis_interval_combo.setCurrentText("30 минут")
+        
+        form_layout.addRow("Размер позиции:", self.position_size_spin)
+        form_layout.addRow("Плечо:", self.leverage_spin)
+        form_layout.addRow("Интервал анализа:", self.analysis_interval_combo)
+        
+        group_layout.addLayout(form_layout)
+        self.layout.addWidget(group)
+        
+    def create_data_management(self):
+        group = QGroupBox("🗃️ Управление Данными и Логами")
+        group_layout = QVBoxLayout(group)
+        
+        # Настройки данных
+        data_layout = QVBoxLayout()
+        data_layout.setSpacing(15)
+        
+        self.auto_cleanup_check = QCheckBox("Автоматическая очистка старых данных")
+        self.auto_cleanup_check.setChecked(True)
+        
+        self.save_logs_check = QCheckBox("Сохранять детальные логи торговли")
+        self.save_logs_check.setChecked(True)
+        
+        self.export_reports_check = QCheckBox("Экспорт отчетов в CSV")
+        self.export_reports_check.setChecked(True)
+        
+        # Кнопки управления данными
+        buttons_layout = QHBoxLayout()
+        
+        clear_data_btn = QPushButton("🧹 Очистить базу данных")
+        clear_data_btn.setObjectName("danger")
+        clear_data_btn.setFixedSize(180, 40)
+        clear_data_btn.clicked.connect(self.clear_knowledge_base)
+        
+        export_data_btn = QPushButton("📤 Экспорт всех данных")
+        export_data_btn.setFixedSize(180, 40)
+        export_data_btn.clicked.connect(self.export_data)
+        
+        buttons_layout.addWidget(clear_data_btn)
+        buttons_layout.addWidget(export_data_btn)
+        buttons_layout.addStretch()
+        
+        data_layout.addWidget(self.auto_cleanup_check)
+        data_layout.addWidget(self.save_logs_check)
+        data_layout.addWidget(self.export_reports_check)
+        data_layout.addSpacing(10)
+        data_layout.addLayout(buttons_layout)
+        
+        group_layout.addLayout(data_layout)
+        self.layout.addWidget(group)
+        
+    def create_action_buttons(self):
+        buttons_frame = QFrame()
+        buttons_layout = QHBoxLayout(buttons_frame)
+        
+        save_btn = QPushButton("💾 Сохранить настройки")
+        save_btn.setObjectName("success")
+        save_btn.setFixedSize(200, 50)
+        save_btn.clicked.connect(self.save_settings)
+        
+        reset_btn = QPushButton("🔄 Сбросить настройки")
+        reset_btn.setFixedSize(160, 50)
+        reset_btn.clicked.connect(self.reset_settings)
+        
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(reset_btn)
+        buttons_layout.addWidget(save_btn)
+        
+        self.layout.addWidget(buttons_frame)
+        
+    def update_selected_pairs(self):
+        """Обновление списка выбранных пар"""
+        self.selected_pairs = []
+        for i in range(self.pairs_list.count()):
+            item = self.pairs_list.item(i)
+            if item.checkState() == Qt.Checked:
+                self.selected_pairs.append(item.text())
+        
+        count = len(self.selected_pairs)
+        self.selection_status.setText(f"Выбрано пар: {count}/10")
+        
+        if count > 10:
+            self.selection_status.setStyleSheet("color: #FF6B6B; font-weight: 600; font-size: 14px;")
+        else:
+            self.selection_status.setStyleSheet("color: #56ABFF; font-weight: 600; font-size: 14px;")
+        
+    def clear_knowledge_base(self):
+        """Очистка базы данных"""
+        print("Очистка базы данных...")
+        
+    def export_data(self):
+        """Экспорт данных"""
+        print("Экспорт данных...")
+        
+    def save_settings(self):
+        """Сохранение настроек"""
+        if len(self.selected_pairs) > 10:
+            print("Ошибка: нельзя выбрать больше 10 пар")
+            return
+            
+        settings = {
+            'trading_pairs': self.selected_pairs,
+            'position_size': self.position_size_spin.value(),
+            'leverage': self.leverage_spin.value(),
+            'analysis_interval': self.analysis_interval_combo.currentText(),
+            'auto_cleanup': self.auto_cleanup_check.isChecked(),
+            'save_logs': self.save_logs_check.isChecked(),
+            'export_reports': self.export_reports_check.isChecked()
+        }
+        print("Сохранение настроек:", settings)
+        
+    def reset_settings(self):
+        """Сброс настроек"""
+        # Сброс выбора пар
+        for i in range(self.pairs_list.count()):
+            item = self.pairs_list.item(i)
+            item.setCheckState(Qt.Unchecked)
+        
+        # Сброс остальных настроек
+        self.position_size_spin.setValue(15)
+        self.leverage_spin.setValue(5)
+        self.analysis_interval_combo.setCurrentText("30 минут")
+        self.auto_cleanup_check.setChecked(True)
+        self.save_logs_check.setChecked(True)
+        self.export_reports_check.setChecked(True)
