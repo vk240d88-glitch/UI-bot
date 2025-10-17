@@ -1,0 +1,262 @@
+import json
+import logging
+from typing import Dict, Any, List
+import requests  # Добавлен импорт для реального API-запроса
+
+from config import CONFIG, GROK_API_KEY
+
+logger = logging.getLogger(__name__)
+
+class ConservativeRiskManager:
+    def __init__(self):
+        self.base_position_size = CONFIG['conservative']['base_position_size']
+        self.confidence_multiplier_min = CONFIG['conservative']['confidence_multiplier_min']
+        self.confidence_multiplier_max = CONFIG['conservative']['confidence_multiplier_max']
+        self.volatility_multiplier_min = CONFIG['conservative']['volatility_multiplier_min']
+        self.volatility_multiplier_max = CONFIG['conservative']['volatility_multiplier_max']
+        self.loss_penalty_factors = CONFIG['conservative']['loss_penalty_factors']
+        
+        self.daily_pnl = 0.0
+        self.consecutive_losses = 0
+        self.daily_trades = 0
+
+    def calculate_position_size(self, balance: float, confidence: float, volatility: float) -> float:
+        confidence_multiplier = self.confidence_multiplier_min + (confidence - 0.5) * (self.confidence_multiplier_max - self.confidence_multiplier_min) / 0.5
+        confidence_multiplier = max(min(confidence_multiplier, self.confidence_multiplier_max), self.confidence_multiplier_min)
+        
+        normalized_volatility = max(min(volatility, 2.0), 0.5)
+        volatility_multiplier = self.volatility_multiplier_max - (normalized_volatility - 0.5) * (self.volatility_multiplier_max - self.volatility_multiplier_min) / 1.5
+        
+        loss_penalty = self.loss_penalty_factors[min(self.consecutive_losses, len(self.loss_penalty_factors) - 1)]
+        
+        position_size = balance * self.base_position_size * confidence_multiplier * volatility_multiplier * loss_penalty
+        
+        logger.info(f"Calculated position size: {position_size:.2f} USDT (conf_mult: {confidence_multiplier:.2f}, vol_mult: {volatility_multiplier:.2f}, loss_penalty: {loss_penalty:.2f})")
+        return position_size
+
+    def update_daily_stats(self, pnl: float, is_loss: bool):
+        self.daily_pnl += pnl
+        self.daily_trades += 1
+        
+        if is_loss:
+            self.consecutive_losses += 1
+        else:
+            self.consecutive_losses = 0
+        
+        logger.info(f"Updated daily stats: PnL={self.daily_pnl:.2f}, trades={self.daily_trades}, consec_losses={self.consecutive_losses}")
+
+    def can_trade_today(self) -> bool:
+        max_daily_loss = CONFIG['conservative']['max_daily_loss']
+        max_daily_trades = CONFIG['conservative']['max_daily_trades']
+        max_consecutive_losses = CONFIG['conservative']['max_consecutive_losses']
+        
+        can_trade = (self.daily_pnl > -max_daily_loss and 
+                     self.daily_trades < max_daily_trades and 
+                     self.consecutive_losses < max_consecutive_losses)
+        
+        if not can_trade:
+            logger.warning(f"Trading limit reached: PnL={self.daily_pnl:.2f}, trades={self.daily_trades}, losses={self.consecutive_losses}")
+        
+        return can_trade
+
+    def reset_daily_stats(self):
+        self.daily_pnl = 0.0
+        self.daily_trades = 0
+        # Note: consecutive_losses not reset daily, as it might span days
+
+class ConservativeGrokFilter:
+    def __init__(self, api_key: str = GROK_API_KEY):
+        self.api_key = api_key
+        self.min_confidence = CONFIG['conservative']['min_grok_confidence']
+        self.fallback_threshold = CONFIG['conservative']['fallback_threshold']
+        
+        try:
+            with open('knowledge_base.json', 'r') as f:
+                self.knowledge_base = json.load(f)
+        except FileNotFoundError:
+            logger.warning("knowledge_base.json not found. Using empty knowledge base.")
+            self.knowledge_base = {}
+
+    def analyze_primary_trend(self, symbol: str, technical_data: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            grok_result = self._call_grok_api(symbol, technical_data)
+            
+            if grok_result.get('grok_analysis', False):
+                trend = grok_result.get('trend', 'NEUTRAL')
+                confidence = grok_result.get('confidence', 0.0)
+                reasoning = grok_result.get('reasoning', '')
+                
+                if confidence >= self.min_confidence:
+                    logger.info(f"Grok analysis for {symbol}: {trend} (conf: {confidence:.2f})")
+                    return {
+                        'trend': trend,
+                        'confidence': confidence,
+                        'reasoning': reasoning,
+                        'grok_analysis': True
+                    }
+            
+        except Exception as e:
+            logger.warning(f"Grok API call failed: {str(e)}. Using conservative fallback.")
+        
+        # Fallback to conservative rule-based analysis
+        return self._conservative_fallback(symbol, technical_data)
+
+    def _call_grok_api(self, symbol: str, technical_data: Dict[str, Any]) -> Dict[str, Any]:
+        # Реальная реализация вызова Grok API
+        endpoint = "https://api.x.ai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Строим промпт на основе technical_data и knowledge_base
+        system_prompt = (
+            "You are a conservative trading analyst. Analyze the provided technical data for primary trend. "
+            "Respond ONLY in JSON format: {'trend': 'BULLISH' or 'BEARISH' or 'NEUTRAL', "
+            "'confidence': float between 0.0 and 1.0, 'reasoning': 'brief explanation'}"
+        )
+        
+        # Добавляем knowledge_base как контекст, если есть
+        if self.knowledge_base:
+            system_prompt += "\nKnowledge base: " + json.dumps(self.knowledge_base, indent=2)
+        
+        user_prompt = (
+            f"Symbol: {symbol}\n"
+            f"Technical data:\n"
+            f"Trend: {json.dumps(technical_data.get('trend_data', {}))}\n"
+            f"Entry: {json.dumps(technical_data.get('entry_data', {}))}\n"
+            f"Risk: {json.dumps(technical_data.get('risk_data', {}))}\n"
+            "Determine primary trend conservatively."
+        )
+        
+        payload = {
+            "model": "grok-beta",  # Или актуальная модель, проверь на x.ai
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.3,  # Консервативный, низкая температура для предсказуемости
+            "max_tokens": 200
+        }
+        
+        try:
+            response = requests.post(endpoint, headers=headers, json=payload, timeout=10)
+            response.raise_for_status()
+            
+            api_response = response.json()
+            content = api_response['choices'][0]['message']['content']
+            
+            # Парсим JSON из ответа
+            try:
+                result = json.loads(content)
+                result['grok_analysis'] = True
+                return result
+            except json.JSONDecodeError:
+                logger.error("Grok response not valid JSON.")
+                return self._conservative_fallback(symbol, technical_data)
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"API request failed: {str(e)}")
+            return self._conservative_fallback(symbol, technical_data)
+
+    def _conservative_fallback(self, symbol: str, technical_data: Dict[str, Any]) -> Dict[str, Any]:
+        trend_data = technical_data.get('trend_data', {})
+        entry_data = technical_data.get('entry_data', {})
+        
+        adx = trend_data.get('adx', 0.0)
+        trend_strength = trend_data.get('strength', 'neutral').lower()
+        entry_confidence = entry_data.get('confidence', 0.0)
+        entry_action = entry_data.get('action', 'HOLD').upper()
+        
+        if (adx > 25 and 
+            entry_confidence > 0.7 and 
+            entry_action in ['BUY', 'SELL'] and
+            ((trend_strength == 'bullish' and entry_action == 'BUY') or
+             (trend_strength == 'bearish' and entry_action == 'SELL'))):
+            
+            trend = 'BULLISH' if entry_action == 'BUY' else 'BEARISH'
+            confidence = min(0.7 + (adx - 25) / 100, 0.85)
+            reasoning = f"Conservative Fallback: Strong trend detected with ADX={adx:.2f}, confidence={entry_confidence:.2f}"
+        else:
+            trend = 'NEUTRAL'
+            confidence = 0.3
+            reasoning = "Conservative Fallback: Insufficient trend strength or conflicting signals"
+        
+        logger.info(f"Fallback analysis for {symbol}: {trend} (conf: {confidence:.2f})")
+        
+        return {
+            'trend': trend,
+            'confidence': confidence,
+            'reasoning': reasoning,
+            'grok_analysis': False
+        }
+
+def apply_quality_filters(analysis_data: Dict[str, Any]) -> tuple[bool, List[str]]:
+    min_confidence = CONFIG['conservative']['min_confidence']
+    min_trend_confidence = CONFIG['conservative']['min_trend_confidence']
+    min_adx = CONFIG['conservative']['min_adx']
+    rsi_range = CONFIG['conservative']['rsi_range']
+    min_consistency = CONFIG['conservative']['min_consistency']
+    max_volatility = CONFIG['conservative']['max_volatility']
+    min_execution_quality = CONFIG['conservative']['min_execution_quality']
+    
+    filters = []
+    passed = True
+    
+    # Confidence filter
+    confidence = analysis_data.get('entry_data', {}).get('confidence', 0.0)
+    if confidence >= min_confidence:
+        filters.append(f"✅ Confidence: {confidence:.2f} >= {min_confidence}")
+    else:
+        filters.append(f"❌ Confidence too low: {confidence:.2f} < {min_confidence}")
+        passed = False
+    
+    # Trend confidence
+    trend_conf = analysis_data.get('grok_data', {}).get('confidence', 0.0)
+    if trend_conf >= min_trend_confidence:
+        filters.append(f"✅ Trend confidence: {trend_conf:.2f} >= {min_trend_confidence}")
+    else:
+        filters.append(f"❌ Trend confidence too low: {trend_conf:.2f} < {min_trend_confidence}")
+        passed = False
+    
+    # ADX filter
+    adx = analysis_data.get('trend_data', {}).get('adx', 0.0)
+    if adx >= min_adx:
+        filters.append(f"✅ ADX: {adx:.2f} >= {min_adx}")
+    else:
+        filters.append(f"❌ ADX too low: {adx:.2f} < {min_adx}")
+        passed = False
+    
+    # RSI filter
+    rsi = analysis_data.get('entry_data', {}).get('rsi', 0.0)
+    if rsi_range[0] <= rsi <= rsi_range[1]:
+        filters.append(f"✅ RSI: {rsi:.2f} in [{rsi_range[0]}, {rsi_range[1]}]")
+    else:
+        filters.append(f"❌ RSI out of range: {rsi:.2f} not in [{rsi_range[0]}, {rsi_range[1]}]")
+        passed = False
+    
+    # Consistency filter
+    consistency = analysis_data.get('risk_data', {}).get('consistency', 0.0)
+    if consistency >= min_consistency:
+        filters.append(f"✅ Consistency: {consistency:.2f} >= {min_consistency}")
+    else:
+        filters.append(f"❌ Consistency too low: {consistency:.2f} < {min_consistency}")
+        passed = False
+    
+    # Volatility filter
+    volatility = analysis_data.get('risk_data', {}).get('volatility', 0.0)
+    if volatility <= max_volatility:
+        filters.append(f"✅ Volatility: {volatility:.2f} <= {max_volatility}")
+    else:
+        filters.append(f"❌ Volatility too high: {volatility:.2f} > {max_volatility}")
+        passed = False
+    
+    # Execution quality
+    execution_quality = analysis_data.get('execution_data', {}).get('quality', 0.0)
+    if execution_quality >= min_execution_quality:
+        filters.append(f"✅ Execution quality: {execution_quality:.2f} >= {min_execution_quality}")
+    else:
+        filters.append(f"❌ Execution quality too low: {execution_quality:.2f} < {min_execution_quality}")
+        passed = False
+    
+    return passed, filters
