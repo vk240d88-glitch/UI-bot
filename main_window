@@ -1,0 +1,1420 @@
+# main_window.py - ПОЛНЫЙ ИСПРАВЛЕННЫЙ КОД
+import sys
+import random
+import threading
+import time
+import traceback
+from datetime import datetime
+from typing import Dict
+from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+                             QLabel, QPushButton, QFrame, QTabWidget, QStatusBar,
+                             QGraphicsDropShadowEffect, QListWidget, QListWidgetItem,
+                             QCheckBox, QComboBox, QSlider, QScrollArea, QGroupBox,
+                             QTextEdit, QProgressBar, QTableWidget, QTableWidgetItem,
+                             QHeaderView, QSplitter, QMessageBox, QTreeWidget, QTreeWidgetItem,
+                             QGridLayout, QSpinBox, QDoubleSpinBox, QDialog, QDialogButtonBox,
+                             QFormLayout, QLineEdit)
+from PyQt5.QtCore import Qt, QTimer, QDateTime, pyqtSignal, QThread
+from PyQt5.QtGui import QFont, QColor, QTextCursor
+
+from dashboard import DashboardWidget
+from settings import SettingsWidget
+
+class FilterAnalysisWidget(QTableWidget):
+    """Виджет для отображения сценариев отказа/подтверждения сделок"""
+    
+    def __init__(self):
+        super().__init__()
+        self.setColumnCount(9)  # Символ + 7 фильтров + итог
+        self.setHorizontalHeaderLabels([
+            "Символ", "Уверенность", "Тренд", "ADX", "RSI", 
+            "Согласованность", "Волатильность", "Исполнение", "РЕШЕНИЕ"
+        ])
+        
+        self.setStyleSheet("""
+            QTableWidget {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                gridline-color: rgba(255, 255, 255, 0.1);
+                color: #FFFFFF;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            QTableWidget::item {
+                padding: 10px 6px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                height: 22px;
+            }
+            QHeaderView::section {
+                background: rgba(0, 212, 170, 0.25);
+                color: #00D4AA;
+                font-weight: 700;
+                font-size: 12px;
+                padding: 10px 6px;
+                border: none;
+            }
+        """)
+        
+        # Настройка размеров колонок
+        self.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        for i in range(1, 8):
+            self.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeToContents)
+        self.horizontalHeader().setSectionResizeMode(8, QHeaderView.Stretch)
+        
+        self.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.setRowCount(0)
+    
+    def update_filter_analysis(self, symbol: str, technical_data: Dict, primary_trend: Dict, 
+                             entry_signal: Dict, decision: Dict):
+        """Обновление анализа фильтров для символа"""
+        
+        # Ищем существующую строку
+        row_count = self.rowCount()
+        row_index = -1
+        for i in range(row_count):
+            if self.item(i, 0).text() == symbol:
+                row_index = i
+                break
+        
+        # Если нет - добавляем новую строку
+        if row_index == -1:
+            row_index = row_count
+            self.insertRow(row_index)
+        
+        # Данные для проверок
+        confidence = entry_signal.get('confidence', 0)
+        trend_confidence = primary_trend.get('confidence', 0)
+        adx = technical_data['trend'].get('adx', 0)
+        rsi = entry_signal.get('rsi', 50)
+        trend = primary_trend.get('trend', 'NEUTRAL')
+        action = entry_signal.get('action', 'HOLD')
+        volatility = technical_data['risk'].get('volatility', 'LOW')
+        execution_conf = technical_data['execution'].get('confidence', 0)
+        
+        # Проверка фильтров
+        filters_passed = []
+        
+        # 1. Уверенность сигнала (>= 0.65)
+        conf_ok = confidence >= 0.65
+        filters_passed.append(conf_ok)
+        
+        # 2. Уверенность тренда (>= 0.6)
+        trend_ok = trend_confidence >= 0.6
+        filters_passed.append(trend_ok)
+        
+        # 3. ADX (>= 20)
+        adx_ok = adx >= 20
+        filters_passed.append(adx_ok)
+        
+        # 4. RSI (25-75)
+        rsi_ok = 25 <= rsi <= 75
+        filters_passed.append(rsi_ok)
+        
+        # 5. Согласованность
+        consistency_ok = ((trend == 'BULLISH' and action == 'BUY') or 
+                         (trend == 'BEARISH' and action == 'SELL'))
+        filters_passed.append(consistency_ok)
+        
+        # 6. Волатильность
+        volatility_ok = not (volatility == 'HIGH' and confidence < 0.75)
+        filters_passed.append(volatility_ok)
+        
+        # 7. Исполнение
+        execution_ok = execution_conf >= 0.4
+        filters_passed.append(execution_ok)
+        
+        # Итоговое решение
+        all_passed = all(filters_passed)
+        final_decision = decision.get('action', 'HOLD')
+        
+        # Заполняем таблицу
+        self.fill_filter_row(row_index, symbol, filters_passed, final_decision,
+                           confidence, trend_confidence, adx, rsi, 
+                           consistency_ok, volatility, execution_conf)
+    
+    def fill_filter_row(self, row_index, symbol, filters_passed, final_decision,
+                       confidence, trend_conf, adx, rsi, consistency_ok, volatility, execution_conf):
+        """Заполнение строки фильтров"""
+        
+        # Символ
+        symbol_item = QTableWidgetItem(symbol)
+        symbol_item.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        
+        # Фильтры с иконками
+        items = []
+        
+        # 1. Уверенность
+        conf_item = QTableWidgetItem(f"{confidence:.2f}")
+        conf_item.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        conf_item.setForeground(QColor('#00D4AA') if filters_passed[0] else QColor('#FF6B6B'))
+        items.append(conf_item)
+        
+        # 2. Тренд
+        trend_item = QTableWidgetItem(f"{trend_conf:.2f}")
+        trend_item.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        trend_item.setForeground(QColor('#00D4AA') if filters_passed[1] else QColor('#FF6B6B'))
+        items.append(trend_item)
+        
+        # 3. ADX
+        adx_item = QTableWidgetItem(f"{adx:.1f}")
+        adx_item.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        adx_item.setForeground(QColor('#00D4AA') if filters_passed[2] else QColor('#FF6B6B'))
+        items.append(adx_item)
+        
+        # 4. RSI
+        rsi_item = QTableWidgetItem(f"{rsi:.1f}")
+        rsi_item.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        rsi_item.setForeground(QColor('#00D4AA') if filters_passed[3] else QColor('#FF6B6B'))
+        items.append(rsi_item)
+        
+        # 5. Согласованность
+        consistency_item = QTableWidgetItem("✅" if filters_passed[4] else "❌")
+        consistency_item.setFont(QFont("Segoe UI", 12))
+        consistency_item.setForeground(QColor('#00D4AA') if filters_passed[4] else QColor('#FF6B6B'))
+        items.append(consistency_item)
+        
+        # 6. Волатильность
+        vol_item = QTableWidgetItem(volatility)
+        vol_item.setFont(QFont("Segoe UI", 11))
+        vol_item.setForeground(QColor('#00D4AA') if filters_passed[5] else QColor('#FF6B6B'))
+        items.append(vol_item)
+        
+        # 7. Исполнение
+        exec_item = QTableWidgetItem(f"{execution_conf:.2f}")
+        exec_item.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        exec_item.setForeground(QColor('#00D4AA') if filters_passed[6] else QColor('#FF6B6B'))
+        items.append(exec_item)
+        
+        # 8. Итоговое решение
+        decision_item = QTableWidgetItem(final_decision)
+        decision_item.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        if final_decision == 'EXECUTED':
+            decision_item.setForeground(QColor('#00D4AA'))
+            decision_item.setText("✅ EXECUTED")
+        elif final_decision == 'HOLD':
+            decision_item.setForeground(QColor('#FFA726'))
+        else:
+            decision_item.setForeground(QColor('#FF6B6B'))
+        
+        # Устанавливаем все items
+        self.setItem(row_index, 0, symbol_item)
+        for i, item in enumerate(items, 1):
+            self.setItem(row_index, i, item)
+        self.setItem(row_index, 8, decision_item)
+
+class AnalysisVisualizer(QTreeWidget):
+    """Виджет для визуализации процесса анализа"""
+    
+    def __init__(self):
+        super().__init__()
+        self.setColumnCount(3)
+        self.setHeaderLabels(["Этап анализа", "Статус", "Детали"])
+        
+        self.setStyleSheet("""
+            QTreeWidget {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                color: #FFFFFF;
+                font-size: 16px;
+                font-weight: 500;
+            }
+            QTreeWidget::item {
+                padding: 12px 8px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                height: 25px;
+            }
+            QHeaderView::section {
+                background: rgba(86, 171, 255, 0.25);
+                color: #56ABFF;
+                font-weight: 700;
+                font-size: 15px;
+                padding: 12px 8px;
+                border: none;
+            }
+        """)
+        
+        self.setColumnWidth(0, 250)
+        self.setColumnWidth(1, 120)
+        self.setColumnWidth(2, 400)
+    
+    def add_analysis_step(self, symbol, step_name, status, details=""):
+        """Добавление шага анализа"""
+        symbol_item = None
+        for i in range(self.topLevelItemCount()):
+            item = self.topLevelItem(i)
+            if item.text(0) == symbol:
+                symbol_item = item
+                break
+        
+        if not symbol_item:
+            symbol_item = QTreeWidgetItem([symbol, "🔍 Анализ...", ""])
+            symbol_item.setFont(0, QFont("Segoe UI", 14, QFont.Bold))
+            self.addTopLevelItem(symbol_item)
+            symbol_item.setExpanded(True)
+        
+        step_item = QTreeWidgetItem([step_name, status, details])
+        step_item.setFont(0, QFont("Segoe UI", 13))
+        step_item.setFont(1, QFont("Segoe UI", 13))
+        step_item.setFont(2, QFont("Segoe UI", 12))
+        symbol_item.addChild(step_item)
+        
+        self.scrollToItem(step_item)
+        
+        if "✅" in status:
+            symbol_item.setText(1, "✅ Завершен")
+            symbol_item.setForeground(1, QColor('#00D4AA'))
+        elif "❌" in status:
+            symbol_item.setText(1, "❌ Ошибка")
+            symbol_item.setForeground(1, QColor('#FF6B6B'))
+        elif "⚡" in status:
+            symbol_item.setText(1, "⚡ В процессе")
+            symbol_item.setForeground(1, QColor('#FFA726'))
+
+class TradingLogWidget(QTextEdit):
+    """Виджет для отображения логов торговли"""
+    
+    def __init__(self):
+        super().__init__()
+        self.setReadOnly(True)
+        self.setMaximumHeight(250)
+        self.setStyleSheet("""
+            QTextEdit {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                color: #B0B0B0;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 15px;
+                font-weight: 500;
+                padding: 12px;
+                line-height: 1.4;
+            }
+        """)
+    
+    def add_log(self, message, message_type="info"):
+        """Добавление сообщения в лог"""
+        timestamp = QDateTime.currentDateTime().toString("hh:mm:ss")
+        
+        if message_type == "error":
+            color = "#FF6B6B"
+            prefix = "❌"
+        elif message_type == "success":
+            color = "#00D4AA"
+            prefix = "✅"
+        elif message_type == "warning":
+            color = "#FFA726"
+            prefix = "⚠️"
+        else:
+            color = "#56ABFF"
+            prefix = "ℹ️"
+        
+        html_message = f"""
+        <div style="margin: 4px 0; line-height: 1.4;">
+            <span style="color: #B0B0B0; font-size: 14px;">[{timestamp}]</span>
+            <span style="color: {color}; font-weight: 600; font-size: 15px;"> {prefix} {message}</span>
+        </div>
+        """
+        
+        scrollbar = self.verticalScrollBar()
+        at_bottom = scrollbar.value() == scrollbar.maximum()
+        
+        self.append(html_message)
+        
+        if at_bottom:
+            cursor = self.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            self.setTextCursor(cursor)
+
+class PositionsWidget(QTableWidget):
+    """Виджет для отображения открытых позиций"""
+    
+    def __init__(self):
+        super().__init__()
+        self.setColumnCount(6)
+        self.setHorizontalHeaderLabels(["Символ", "Сторона", "Размер", "Цена входа", "P&L", "P&L %"])
+        
+        self.setStyleSheet("""
+            QTableWidget {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                gridline-color: rgba(255, 255, 255, 0.1);
+                color: #FFFFFF;
+                font-size: 14px;
+                font-weight: 500;
+            }
+            QTableWidget::item {
+                padding: 12px 8px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                height: 25px;
+            }
+            QHeaderView::section {
+                background: rgba(86, 171, 255, 0.25);
+                color: #56ABFF;
+                font-weight: 700;
+                font-size: 14px;
+                padding: 12px 8px;
+                border: none;
+            }
+        """)
+        
+        self.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.setSelectionBehavior(QTableWidget.SelectRows)
+        self.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.setRowCount(0)
+
+    def update_positions(self, positions):
+        """Обновление списка позиций"""
+        self.setRowCount(len(positions))
+        
+        for row, position in enumerate(positions):
+            symbol_item = QTableWidgetItem(position.get('symbol', 'N/A'))
+            symbol_item.setFont(QFont("Segoe UI", 13))
+            
+            side = position.get('side', '').upper()
+            side_item = QTableWidgetItem(side)
+            side_item.setFont(QFont("Segoe UI", 13, QFont.Bold))
+            if side == 'LONG':
+                side_item.setForeground(QColor('#00D4AA'))
+            else:
+                side_item.setForeground(QColor('#FF6B6B'))
+            
+            size = position.get('size', 0)
+            size_item = QTableWidgetItem(f"{size:.4f}")
+            size_item.setFont(QFont("Segoe UI", 13))
+            
+            entry_price = position.get('entry_price', 0)
+            entry_item = QTableWidgetItem(f"{entry_price:.4f}")
+            entry_item.setFont(QFont("Segoe UI", 13))
+            
+            pnl = position.get('unrealized_pnl', 0)
+            pnl_item = QTableWidgetItem(f"{pnl:.2f} USDT")
+            pnl_item.setFont(QFont("Segoe UI", 13, QFont.Bold))
+            if pnl >= 0:
+                pnl_item.setForeground(QColor('#00D4AA'))
+            else:
+                pnl_item.setForeground(QColor('#FF6B6B'))
+            
+            if entry_price > 0 and size > 0:
+                pnl_percent = (pnl / (entry_price * size)) * 100
+                percent_item = QTableWidgetItem(f"{pnl_percent:.2f}%")
+                percent_item.setFont(QFont("Segoe UI", 13, QFont.Bold))
+                if pnl_percent >= 0:
+                    percent_item.setForeground(QColor('#00D4AA'))
+                else:
+                    percent_item.setForeground(QColor('#FF6B6B'))
+            else:
+                percent_item = QTableWidgetItem("0.00%")
+                percent_item.setFont(QFont("Segoe UI", 13))
+            
+            self.setItem(row, 0, symbol_item)
+            self.setItem(row, 1, side_item)
+            self.setItem(row, 2, size_item)
+            self.setItem(row, 3, entry_item)
+            self.setItem(row, 4, pnl_item)
+            self.setItem(row, 5, percent_item)
+
+class GrokAnalysisWidget(QWidget):
+    """Виджет для отображения анализа Grok с УМЕНЬШЕННЫМ шрифтом"""
+    
+    def __init__(self):
+        super().__init__()
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
+        
+        self.title = QLabel("🎯 АНАЛИЗ GROK AI")
+        self.title.setStyleSheet("""
+            color: #56ABFF; 
+            font-size: 18px;
+            font-weight: 700;
+            padding: 5px 0px;
+        """)
+        self.title.setAlignment(Qt.AlignCenter)
+        
+        self.analysis_table = QTableWidget()
+        self.analysis_table.setColumnCount(4)
+        self.analysis_table.setHorizontalHeaderLabels(["Символ", "Тренд", "Уверенность", "Обоснование"])
+        
+        self.analysis_table.setStyleSheet("""
+            QTableWidget {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                color: #FFFFFF;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            QTableWidget::item {
+                padding: 10px 6px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                height: 22px;
+            }
+            QHeaderView::section {
+                background: rgba(86, 171, 255, 0.25);
+                color: #56ABFF;
+                font-weight: 700;
+                font-size: 13px;
+                padding: 10px 6px;
+                border: none;
+            }
+        """)
+        
+        self.analysis_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.analysis_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.analysis_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.analysis_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.analysis_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        
+        self.layout.addWidget(self.title)
+        self.layout.addWidget(self.analysis_table)
+    
+    def update_analysis(self, symbol, analysis_data):
+        """Обновление анализа для символа"""
+        row_count = self.analysis_table.rowCount()
+        row_index = -1
+        for i in range(row_count):
+            if self.analysis_table.item(i, 0).text() == symbol:
+                row_index = i
+                break
+        
+        if row_index == -1:
+            row_index = row_count
+            self.analysis_table.insertRow(row_index)
+        
+        trend = analysis_data.get('trend', 'NEUTRAL')
+        confidence = analysis_data.get('confidence', 0) * 100
+        reasoning = analysis_data.get('reasoning', '')
+        
+        symbol_item = QTableWidgetItem(symbol)
+        symbol_item.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        
+        trend_item = QTableWidgetItem(trend)
+        trend_item.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        if trend == 'BULLISH':
+            trend_item.setForeground(QColor('#00D4AA'))
+        elif trend == 'BEARISH':
+            trend_item.setForeground(QColor('#FF6B6B'))
+        else:
+            trend_item.setForeground(QColor('#FFA726'))
+        
+        confidence_item = QTableWidgetItem(f"{confidence:.1f}%")
+        confidence_item.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        if confidence >= 70:
+            confidence_item.setForeground(QColor('#00D4AA'))
+        elif confidence >= 50:
+            confidence_item.setForeground(QColor('#FFA726'))
+        else:
+            confidence_item.setForeground(QColor('#FF6B6B'))
+        
+        reasoning_item = QTableWidgetItem(reasoning)
+        reasoning_item.setFont(QFont("Segoe UI", 11))
+        reasoning_item.setToolTip(reasoning)
+        
+        self.analysis_table.setItem(row_index, 0, symbol_item)
+        self.analysis_table.setItem(row_index, 1, trend_item)
+        self.analysis_table.setItem(row_index, 2, confidence_item)
+        self.analysis_table.setItem(row_index, 3, reasoning_item)
+
+class TechnicalAnalysisWidget(QWidget):
+    """Виджет для отображения технического анализа и фильтрации"""
+    
+    def __init__(self):
+        super().__init__()
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
+        
+        self.title = QLabel("📊 ТЕХНИЧЕСКИЙ АНАЛИЗ И ФИЛЬТРАЦИЯ")
+        self.title.setStyleSheet("""
+            color: #00D4AA; 
+            font-size: 18px;
+            font-weight: 700;
+            padding: 5px 0px;
+        """)
+        self.title.setAlignment(Qt.AlignCenter)
+        
+        self.analysis_table = QTableWidget()
+        self.analysis_table.setColumnCount(6)
+        self.analysis_table.setHorizontalHeaderLabels(["Символ", "Тех. сигнал", "Уверенность", "Grok тренд", "Согласованность", "Решение"])
+        self.analysis_table.setStyleSheet("""
+            QTableWidget {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                color: #FFFFFF;
+                font-size: 13px;
+                font-weight: 500;
+            }
+            QTableWidget::item {
+                padding: 12px 6px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                height: 25px;
+            }
+            QHeaderView::section {
+                background: rgba(0, 212, 170, 0.25);
+                color: #00D4AA;
+                font-weight: 700;
+                font-size: 13px;
+                padding: 12px 6px;
+                border: none;
+            }
+        """)
+        
+        self.analysis_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.analysis_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.analysis_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.analysis_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.analysis_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.analysis_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+        
+        self.analysis_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        
+        self.layout.addWidget(self.title)
+        self.layout.addWidget(self.analysis_table)
+    
+    def update_analysis(self, symbol, technical_data, grok_data, decision):
+        """Обновление технического анализа"""
+        row_count = self.analysis_table.rowCount()
+        row_index = -1
+        for i in range(row_count):
+            if self.analysis_table.item(i, 0).text() == symbol:
+                row_index = i
+                break
+        
+        if row_index == -1:
+            row_index = row_count
+            self.analysis_table.insertRow(row_index)
+        
+        tech_signal = technical_data.get('action', 'HOLD')
+        tech_confidence = technical_data.get('confidence', 0) * 100
+        grok_trend = grok_data.get('trend', 'NEUTRAL')
+        grok_confidence = grok_data.get('confidence', 0) * 100
+        
+        is_consistent = (grok_trend == 'BULLISH' and tech_signal == 'BUY') or \
+                       (grok_trend == 'BEARISH' and tech_signal == 'SELL') or \
+                       (grok_trend == 'RANGING' and tech_signal in ['BUY', 'SELL'])
+        
+        consistency = "✅ Согласовано" if is_consistent else "❌ Не согласовано"
+        final_decision = decision.get('action', 'HOLD')
+        
+        symbol_item = QTableWidgetItem(symbol)
+        symbol_item.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        
+        tech_signal_item = QTableWidgetItem(tech_signal)
+        tech_signal_item.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        if tech_signal == 'BUY':
+            tech_signal_item.setForeground(QColor('#00D4AA'))
+        elif tech_signal == 'SELL':
+            tech_signal_item.setForeground(QColor('#FF6B6B'))
+        else:
+            tech_signal_item.setForeground(QColor('#FFA726'))
+        
+        tech_conf_item = QTableWidgetItem(f"{tech_confidence:.1f}%")
+        tech_conf_item.setFont(QFont("Segoe UI", 13))
+        
+        grok_trend_item = QTableWidgetItem(f"{grok_trend} ({grok_confidence:.1f}%)")
+        grok_trend_item.setFont(QFont("Segoe UI", 13))
+        if grok_trend == 'BULLISH':
+            grok_trend_item.setForeground(QColor('#00D4AA'))
+        elif grok_trend == 'BEARISH':
+            grok_trend_item.setForeground(QColor('#FF6B6B'))
+        else:
+            grok_trend_item.setForeground(QColor('#FFA726'))
+        
+        consistency_item = QTableWidgetItem(consistency)
+        consistency_item.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        consistency_item.setForeground(QColor('#00D4AA') if is_consistent else QColor('#FF6B6B'))
+        
+        decision_item = QTableWidgetItem(final_decision)
+        decision_item.setFont(QFont("Segoe UI", 13, QFont.Bold))
+        if final_decision == 'EXECUTED':
+            decision_item.setForeground(QColor('#00D4AA'))
+        elif final_decision == 'HOLD':
+            decision_item.setForeground(QColor('#FFA726'))
+        else:
+            decision_item.setForeground(QColor('#FF6B6B'))
+        
+        self.analysis_table.setItem(row_index, 0, symbol_item)
+        self.analysis_table.setItem(row_index, 1, tech_signal_item)
+        self.analysis_table.setItem(row_index, 2, tech_conf_item)
+        self.analysis_table.setItem(row_index, 3, grok_trend_item)
+        self.analysis_table.setItem(row_index, 4, consistency_item)
+        self.analysis_table.setItem(row_index, 5, decision_item)
+
+class BotWorker(QThread):
+    """Рабочий поток для торгового бота"""
+    
+    status_update = pyqtSignal(str)
+    trade_signal = pyqtSignal(dict)
+    error_signal = pyqtSignal(str)
+    account_update = pyqtSignal(dict)
+    positions_update = pyqtSignal(list)
+    analysis_step = pyqtSignal(str, str, str, str)
+    grok_analysis_result = pyqtSignal(str, dict)
+    technical_analysis_result = pyqtSignal(str, dict, dict, dict)
+    
+    def __init__(self):
+        super().__init__()
+        self.symbols = []
+        self.leverage = 5
+        self.position_size = 15
+        self.is_running = False
+        self.trader = None
+        self.scheduler = None
+        self.initial_grok_analysis = {}
+        
+    def setup(self, symbols, leverage, position_size):
+        """Настройка параметров бота"""
+        self.symbols = symbols
+        self.leverage = leverage
+        self.position_size = position_size
+        
+        self.bybit_api_key = "OqFgjGKhzUyTU2Yesq"
+        self.bybit_secret = "UazxgpqNbiFCFApiOHAd1f1s57a2GhXc4w7x"
+        self.grok_api_key = "xai-p4j0VXesw69krSosEru3vufOu8XQkpYpMU7MBxQi9BGMFn6jq5QmAhjwsmcRD2CcEtfhvG28os6Ld822"
+    
+    def run(self):
+        """Запуск бота в отдельном потоке"""
+        try:
+            self.is_running = True
+            self.status_update.emit("🔄 Инициализация торгового бота...")
+            
+            from grok_trading_bot import (
+                BybitFuturesTrader, AdvancedTechnicalAnalyzer, GrokTrendFilter,
+                SocialSentimentGuard, DynamicPositionManager, SmartTradingPipeline,
+                KnowledgeBase, TradingScheduler
+            )
+            
+            self.trader = BybitFuturesTrader(self.bybit_api_key, self.bybit_secret, True)
+            technical_analyzer = AdvancedTechnicalAnalyzer()
+            grok_filter = GrokTrendFilter(self.grok_api_key)
+            social_guard = SocialSentimentGuard()
+            position_manager = DynamicPositionManager(self.trader)
+            
+            self.status_update.emit("🔧 Создание торгового пайплайна...")
+            
+            trading_pipeline = SmartTradingPipeline(
+                self.trader, technical_analyzer, grok_filter, social_guard, position_manager
+            )
+            
+            knowledge = KnowledgeBase()
+            knowledge.load_from_file()
+            
+            self.status_update.emit("🎯 Выполнение начального анализа Grok...")
+            
+            self.initial_grok_analysis = grok_filter.perform_initial_analysis(
+                self.symbols, technical_analyzer, self.trader.exchange
+            )
+            trading_pipeline.set_initial_grok_analysis(self.initial_grok_analysis)
+            
+            for symbol, analysis in self.initial_grok_analysis.items():
+                self.grok_analysis_result.emit(symbol, analysis)
+            
+            self.status_update.emit("📊 Настройка планировщика...")
+            
+            self.scheduler = TradingScheduler(trading_pipeline, self.trader, knowledge)
+            self.scheduler.setup(self.symbols, self.leverage, self.position_size)
+            self.scheduler.analysis_interval = 2
+            
+            if not self.scheduler.symbols:
+                self.error_signal.emit("❌ Нет рабочих символов!")
+                return
+            
+            self.status_update.emit("✅ Бот успешно запущен! Начинаем анализ...")
+            
+            analysis_count = 0
+            while self.is_running:
+                try:
+                    # Быстрая проверка остановки
+                    if not self.is_running:
+                        break
+                        
+                    analysis_count += 1
+                    
+                    account_info = self.trader.get_account_info()
+                    self.account_update.emit(account_info)
+                    
+                    positions = self.trader.get_positions()
+                    self.positions_update.emit(positions)
+                    
+                    self.status_update.emit(f"🔍 Запуск анализа рынка #{analysis_count}...")
+                    self.analysis_step.emit("SYSTEM", "Начало анализа", "⚡", f"Анализ #{analysis_count}")
+                    
+                    self.scheduler.run_market_analysis()
+                    
+                    self.status_update.emit(f"✅ Анализ #{analysis_count} завершен")
+                    self.analysis_step.emit("SYSTEM", "Завершение анализа", "✅", f"Анализ #{analysis_count} завершен")
+                    
+                    # Пауза между анализами с проверкой остановки
+                    wait_time = self.scheduler.analysis_interval * 60
+                    for i in range(wait_time):
+                        if not self.is_running:  # Быстрая проверка
+                            break
+                        if i % 10 == 0:
+                            remaining = wait_time - i
+                            self.status_update.emit(f"⏳ Ожидание следующего анализа: {remaining} сек")
+                        time.sleep(1)
+                        
+                except Exception as e:
+                    error_msg = f"Ошибка в цикле бота: {str(e)}"
+                    self.error_signal.emit(error_msg)
+                    self.analysis_step.emit("SYSTEM", "Ошибка", "❌", error_msg)
+                    time.sleep(30)
+                    
+        except Exception as e:
+            error_msg = f"Критическая ошибка бота: {str(e)}"
+            self.error_signal.emit(error_msg)
+            self.analysis_step.emit("SYSTEM", "Критическая ошибка", "❌", error_msg)
+
+    def stop(self):
+        """Остановка бота"""
+        self.is_running = False
+        if self.scheduler:
+            self.scheduler.stop()
+        self.wait(5000)  # Ждем до 5 секунд завершения потока
+
+class PremiumMainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.bot_worker = None
+        self.analysis_count = 0  # ДОБАВЛЕНО: инициализация счетчика
+        self.init_ui()
+        
+    def init_ui(self):
+        self.setWindowTitle("🚀 Crypto Trading Bot - Professional Platform v2.4")
+        self.setGeometry(100, 100, 1920, 1080)
+        self.setMinimumSize(1600, 900)
+        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(20)
+        
+        self.create_premium_header(main_layout)
+        self.create_premium_tabs(main_layout)
+        self.create_premium_status_bar()
+        
+        self.ui_timer = QTimer()
+        self.ui_timer.timeout.connect(self.update_ui)
+        self.ui_timer.start(2000)
+        
+    def create_premium_header(self, parent_layout):
+        header_frame = QFrame()
+        header_frame.setObjectName("glass-card")
+        header_frame.setMinimumHeight(120)
+        
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(25)
+        shadow.setColor(QColor(0, 0, 0, 60))
+        shadow.setOffset(0, 8)
+        header_frame.setGraphicsEffect(shadow)
+        
+        header_layout = QHBoxLayout(header_frame)
+        header_layout.setContentsMargins(30, 20, 30, 20)
+        
+        brand_layout = QVBoxLayout()
+        
+        self.title_label = QLabel("КРИПТО ТРЕЙДИНГ БОТ v2.4")
+        self.title_label.setObjectName("header-main")
+        self.title_label.setFont(QFont("Segoe UI", 28, QFont.Bold))
+        
+        self.subtitle_label = QLabel("AI-платформа для автоматической торговли • Интегрированный бот")
+        self.subtitle_label.setObjectName("header-sub")
+        self.subtitle_label.setFont(QFont("Segoe UI", 14))
+        
+        brand_layout.addWidget(self.title_label)
+        brand_layout.addWidget(self.subtitle_label)
+        
+        status_layout = QVBoxLayout()
+        status_layout.setAlignment(Qt.AlignCenter)
+        
+        self.status_indicator = QLabel("🔴 СИСТЕМА ОСТАНОВЛЕНА")
+        self.status_indicator.setObjectName("status-offline")
+        self.status_indicator.setAlignment(Qt.AlignCenter)
+        self.status_indicator.setFont(QFont("Segoe UI", 16, QFont.Bold))
+        
+        self.bot_status_text = QLabel("Торговый бот не запущен")
+        self.bot_status_text.setStyleSheet("color: #B0B0B0; font-size: 14px; font-weight: 500;")
+        self.bot_status_text.setAlignment(Qt.AlignCenter)
+        
+        status_layout.addWidget(self.status_indicator)
+        status_layout.addWidget(self.bot_status_text)
+        
+        control_layout = QHBoxLayout()
+        control_layout.setSpacing(15)
+        
+        self.start_bot_btn = QPushButton("🚀 ЗАПУСК БОТА")
+        self.start_bot_btn.setObjectName("success")
+        self.start_bot_btn.setFixedSize(180, 60)
+        self.start_bot_btn.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        self.start_bot_btn.clicked.connect(self.start_trading_bot)
+        
+        self.stop_bot_btn = QPushButton("🛑 СТОП БОТА")
+        self.stop_bot_btn.setObjectName("danger")
+        self.stop_bot_btn.setFixedSize(160, 60)
+        self.stop_bot_btn.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        self.stop_bot_btn.clicked.connect(self.stop_trading_bot)
+        self.stop_bot_btn.setEnabled(False)
+        
+        settings_btn = QPushButton("⚙️ НАСТРОЙКИ")
+        settings_btn.setObjectName("secondary")
+        settings_btn.setFixedSize(160, 60)
+        settings_btn.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        settings_btn.clicked.connect(self.show_settings)
+        
+        control_layout.addWidget(self.start_bot_btn)
+        control_layout.addWidget(self.stop_bot_btn)
+        control_layout.addWidget(settings_btn)
+        
+        header_layout.addLayout(brand_layout)
+        header_layout.addStretch()
+        header_layout.addLayout(status_layout)
+        header_layout.addStretch()
+        header_layout.addLayout(control_layout)
+        
+        parent_layout.addWidget(header_frame)
+        
+    def create_premium_tabs(self, parent_layout):
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                background: rgba(255, 255, 255, 0.05);
+            }
+            QTabBar::tab {
+                background: rgba(255, 255, 255, 0.05);
+                color: #B0B0B0;
+                padding: 15px 25px;
+                margin-right: 3px;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                font-weight: 600;
+                font-size: 14px;
+            }
+            QTabBar::tab:selected {
+                background: rgba(86, 171, 255, 0.25);
+                color: #56ABFF;
+                border-bottom: 3px solid #56ABFF;
+            }
+            QTabBar::tab:hover {
+                background: rgba(86, 171, 255, 0.15);
+            }
+        """)
+        
+        self.dashboard_tab = DashboardWidget()
+        self.tabs.addTab(self.dashboard_tab, "📊 ДАШБОРД")
+        
+        self.bot_monitor_tab = self.create_bot_monitor_tab()
+        self.tabs.addTab(self.bot_monitor_tab, "🤖 МОНИТОРИНГ")
+        
+        self.settings_tab = SettingsWidget()
+        self.tabs.addTab(self.settings_tab, "⚙️ ТОРГОВЛЯ")
+        
+        parent_layout.addWidget(self.tabs)
+        
+    def create_bot_monitor_tab(self):
+        """Создание вкладки мониторинга с таблицей фильтров"""
+        main_widget = QWidget()
+        main_layout = QVBoxLayout(main_widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(15)
+        
+        top_splitter = QSplitter(Qt.Horizontal)
+        
+        stats_frame = QFrame()
+        stats_frame.setObjectName("glass-card")
+        stats_layout = QVBoxLayout(stats_frame)
+        stats_layout.setContentsMargins(15, 15, 15, 15)
+        
+        stats_title = QLabel("📊 СТАТИСТИКА БОТА")
+        stats_title.setStyleSheet("""
+            color: #56ABFF; 
+            font-size: 18px; 
+            font-weight: 700;
+            padding: 5px 0px;
+        """)
+        stats_title.setAlignment(Qt.AlignCenter)
+        
+        self.stats_analysis_label = QLabel("0")
+        self.stats_analysis_label.setStyleSheet("color: #FFFFFF; font-size: 24px; font-weight: 700;")
+        
+        self.stats_trades_label = QLabel("0/5")
+        self.stats_trades_label.setStyleSheet("color: #FFFFFF; font-size: 24px; font-weight: 700;")
+        
+        self.stats_uptime_label = QLabel("00:00:00")
+        self.stats_uptime_label.setStyleSheet("color: #FFFFFF; font-size: 24px; font-weight: 700;")
+        
+        self.stats_success_label = QLabel("0")
+        self.stats_success_label.setStyleSheet("color: #FFFFFF; font-size: 24px; font-weight: 700;")
+        
+        stats_grid = QGridLayout()
+        stats_grid.addWidget(QLabel("🔄 Анализов:"), 0, 0)
+        stats_grid.addWidget(self.stats_analysis_label, 0, 1)
+        stats_grid.addWidget(QLabel("📊 Сделок сегодня:"), 1, 0)
+        stats_grid.addWidget(self.stats_trades_label, 1, 1)
+        stats_grid.addWidget(QLabel("⏱️ Время работы:"), 2, 0)
+        stats_grid.addWidget(self.stats_uptime_label, 2, 1)
+        stats_grid.addWidget(QLabel("🎯 Успешных сделок:"), 3, 0)
+        stats_grid.addWidget(self.stats_success_label, 3, 1)
+        
+        for i in range(stats_grid.count()):
+            widget = stats_grid.itemAt(i).widget()
+            if isinstance(widget, QLabel) and widget != self.stats_analysis_label and widget != self.stats_trades_label and widget != self.stats_uptime_label and widget != self.stats_success_label:
+                widget.setStyleSheet("color: #B0B0B0; font-size: 16px; font-weight: 600;")
+        
+        stats_layout.addWidget(stats_title)
+        stats_layout.addLayout(stats_grid)
+        stats_layout.addStretch()
+        
+        self.grok_analysis_widget = GrokAnalysisWidget()
+        
+        top_splitter.addWidget(stats_frame)
+        top_splitter.addWidget(self.grok_analysis_widget)
+        top_splitter.setSizes([400, 800])
+        
+        filters_group = QGroupBox("🚦 ФИЛЬТРЫ СДЕЛОК - СЦЕНАРИИ ОТКАЗА/ПОДТВЕРЖДЕНИЯ")
+        filters_group.setStyleSheet("""
+            QGroupBox {
+                color: #FFA726;
+                font-weight: 700;
+                font-size: 16px;
+                border: 2px solid rgba(255, 167, 38, 0.3);
+                border-radius: 12px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        filters_layout = QVBoxLayout(filters_group)
+        self.filter_analysis_widget = FilterAnalysisWidget()
+        filters_layout.addWidget(self.filter_analysis_widget)
+        
+        self.technical_analysis_widget = TechnicalAnalysisWidget()
+        
+        bottom_splitter = QSplitter(Qt.Horizontal)
+        
+        analysis_group = QGroupBox("🔍 ПРОЦЕСС АНАЛИЗА В РЕАЛЬНОМ ВРЕМЕНИ")
+        analysis_group.setStyleSheet("""
+            QGroupBox {
+                color: #FFA726;
+                font-weight: 700;
+                font-size: 16px;
+                border: 2px solid rgba(255, 167, 38, 0.3);
+                border-radius: 12px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        analysis_layout = QVBoxLayout(analysis_group)
+        self.analysis_visualizer = AnalysisVisualizer()
+        analysis_layout.addWidget(self.analysis_visualizer)
+        
+        right_splitter = QSplitter(Qt.Vertical)
+        
+        positions_group = QGroupBox("📊 ОТКРЫТЫЕ ПОЗИЦИИ")
+        positions_group.setStyleSheet("""
+            QGroupBox {
+                color: #00D4AA;
+                font-weight: 700;
+                font-size: 16px;
+                border: 2px solid rgba(0, 212, 170, 0.3);
+                border-radius: 12px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        positions_layout = QVBoxLayout(positions_group)
+        self.positions_table = PositionsWidget()
+        positions_layout.addWidget(self.positions_table)
+        
+        logs_group = QGroupBox("📝 ЛОГ ТОРГОВЛИ")
+        logs_group.setStyleSheet("""
+            QGroupBox {
+                color: #56ABFF;
+                font-weight: 700;
+                font-size: 16px;
+                border: 2px solid rgba(86, 171, 255, 0.3);
+                border-radius: 12px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 15px;
+                padding: 0 10px 0 10px;
+            }
+        """)
+        logs_layout = QVBoxLayout(logs_group)
+        self.trading_log = TradingLogWidget()
+        
+        log_buttons_layout = QHBoxLayout()
+        clear_logs_btn = QPushButton("🧹 ОЧИСТИТЬ ЛОГИ")
+        clear_logs_btn.setFixedSize(150, 40)
+        clear_logs_btn.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        clear_logs_btn.clicked.connect(self.trading_log.clear)
+        
+        clear_analysis_btn = QPushButton("🧹 ОЧИСТИТЬ АНАЛИЗ")
+        clear_analysis_btn.setFixedSize(150, 40)
+        clear_analysis_btn.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        clear_analysis_btn.clicked.connect(self.analysis_visualizer.clear)
+        
+        log_buttons_layout.addWidget(clear_logs_btn)
+        log_buttons_layout.addWidget(clear_analysis_btn)
+        log_buttons_layout.addStretch()
+        
+        logs_layout.addWidget(self.trading_log)
+        logs_layout.addLayout(log_buttons_layout)
+        
+        right_splitter.addWidget(positions_group)
+        right_splitter.addWidget(logs_group)
+        right_splitter.setSizes([500, 400])
+        
+        bottom_splitter.addWidget(analysis_group)
+        bottom_splitter.addWidget(right_splitter)
+        bottom_splitter.setSizes([700, 500])
+        
+        main_layout.addWidget(top_splitter, 1)
+        main_layout.addWidget(filters_group, 1)
+        main_layout.addWidget(self.technical_analysis_widget, 1)
+        main_layout.addWidget(bottom_splitter, 2)
+        
+        return main_widget
+        
+    def create_premium_status_bar(self):
+        status_bar = QStatusBar()
+        self.setStatusBar(status_bar)
+        
+        self.system_info = QLabel("🤖 AI Trading Bot v2.4 • Стабильная версия • Русская версия")
+        self.system_info.setStyleSheet("color: #B0B0B0; font-weight: 500; font-size: 14px;")
+        status_bar.addWidget(self.system_info)
+        
+        self.update_time_label = QLabel()
+        self.update_time_label.setStyleSheet("color: #56ABFF; font-weight: 600; font-size: 14px;")
+        status_bar.addPermanentWidget(self.update_time_label)
+        
+        self.connection_status = QLabel("🔗 Биржа: Не подключено")
+        self.connection_status.setStyleSheet("color: #FF6B6B; font-weight: 600; font-size: 14px;")
+        status_bar.addPermanentWidget(self.connection_status)
+        
+    def start_trading_bot(self):
+        """Запуск торгового бота"""
+        try:
+            symbols = self.settings_tab.selected_pairs
+            leverage = self.settings_tab.leverage_spin.value()
+            position_size = self.settings_tab.position_size_spin.value()
+            
+            if not symbols:
+                QMessageBox.warning(self, "Ошибка", "Выберите торговые пары в настройках!")
+                return
+            
+            self.bot_worker = BotWorker()
+            self.bot_worker.setup(symbols, leverage, position_size)
+            
+            self.bot_worker.status_update.connect(self.on_bot_status_update)
+            self.bot_worker.error_signal.connect(self.on_bot_error)
+            self.bot_worker.account_update.connect(self.on_account_update)
+            self.bot_worker.positions_update.connect(self.on_positions_update)
+            self.bot_worker.analysis_step.connect(self.on_analysis_step)
+            self.bot_worker.grok_analysis_result.connect(self.on_grok_analysis_result)
+            self.bot_worker.technical_analysis_result.connect(self.on_technical_analysis_result)
+            
+            self.bot_worker.start()
+            
+            self.start_bot_btn.setEnabled(False)
+            self.stop_bot_btn.setEnabled(True)
+            self.status_indicator.setText("🟢 ТОРГОВЛЯ АКТИВНА")
+            self.status_indicator.setObjectName("status-online")
+            self.status_indicator.style().unpolish(self.status_indicator)
+            self.status_indicator.style().polish(self.status_indicator)
+            
+            # ДОБАВЛЕНО: сброс счетчика анализов
+            self.analysis_count = 0
+            self.stats_analysis_label.setText("0")
+            
+            self.dashboard_tab.set_bot_running(True)
+            
+            self.trading_log.add_log("Торговый бот запущен", "success")
+            self.trading_log.add_log(f"Символы: {', '.join(symbols)}", "info")
+            self.trading_log.add_log(f"Плечо: {leverage}x, Размер позиции: {position_size}%", "info")
+            
+        except Exception as e:
+            error_msg = f"Ошибка запуска бота: {str(e)}"
+            self.trading_log.add_log(error_msg, "error")
+            QMessageBox.critical(self, "Ошибка", error_msg)
+    
+    def stop_trading_bot(self):
+        """Остановка торгового бота"""
+        try:
+            if self.bot_worker and self.bot_worker.isRunning():
+                # Плавная остановка
+                self.bot_worker.stop()
+                if not self.bot_worker.wait(3000):  # Ждем 3 секунды
+                    # Если поток не остановился, принудительно завершаем
+                    self.bot_worker.terminate()
+                    self.bot_worker.wait()
+                self.bot_worker = None
+                
+            self.start_bot_btn.setEnabled(True)
+            self.stop_bot_btn.setEnabled(False)
+            self.status_indicator.setText("🔴 СИСТЕМА ОСТАНОВЛЕНА")
+            self.status_indicator.setObjectName("status-offline")
+            self.status_indicator.style().unpolish(self.status_indicator)
+            self.status_indicator.style().polish(self.status_indicator)
+            
+            self.dashboard_tab.set_bot_running(False)
+            self.show_demo_data()
+            
+            self.trading_log.add_log("Торговый бот остановлен", "warning")
+            
+        except Exception as e:
+            error_msg = f"Ошибка остановки бота: {str(e)}"
+            self.trading_log.add_log(error_msg, "error")
+    
+    def on_bot_status_update(self, message):
+        """Обработка обновления статуса бота"""
+        self.bot_status_text.setText(message)
+        self.trading_log.add_log(message)
+    
+    def on_bot_error(self, error_message):
+        """Обработка ошибок бота"""
+        self.trading_log.add_log(error_message, "error")
+    
+    def on_account_update(self, account_info):
+        """Обновление информации о счете"""
+        try:
+            real_data = {
+                'total_balance': account_info.get('total_balance', 0),
+                'available_balance': account_info.get('available_balance', 0),
+                'unrealized_pnl': account_info.get('unrealized_pnl', 0),
+                'positions_count': account_info.get('positions_count', 0),
+                'orders_count': account_info.get('orders_count', 0),
+                'daily_trades': "0/5",
+                'total_trades': account_info.get('total_trades', 0),
+                'next_analysis': "2 мин",
+                'performance': account_info.get('unrealized_pnl', 0) / max(account_info.get('total_balance', 1), 1) * 100
+            }
+            self.dashboard_tab.update_dashboard_data(real_data)
+            
+            if account_info.get('total_balance', 0) > 0:
+                self.connection_status.setText("🔗 Биржа: Подключено")
+                self.connection_status.setStyleSheet("color: #00D4AA; font-weight: 600; font-size: 14px;")
+                
+        except Exception as e:
+            print(f"Account update error: {e}")
+    
+    def on_positions_update(self, positions):
+        """Обновление позиций"""
+        try:
+            self.positions_table.update_positions(positions)
+            profitable_positions = sum(1 for p in positions if p.get('unrealized_pnl', 0) > 0)
+            self.stats_success_label.setText(str(profitable_positions))
+            
+        except Exception as e:
+            print(f"Positions update error: {e}")
+    
+    def on_analysis_step(self, symbol, step, status, details):
+        """Обработка шага анализа"""
+        self.analysis_visualizer.add_analysis_step(symbol, step, status, details)
+        
+        if "Анализ #" in details and "завершен" in details:
+            self.analysis_count += 1
+            self.stats_analysis_label.setText(str(self.analysis_count))
+    
+    def on_grok_analysis_result(self, symbol, analysis_data):
+        """Обработка результатов анализа Grok"""
+        self.grok_analysis_widget.update_analysis(symbol, analysis_data)
+        
+        trend = analysis_data.get('trend', 'NEUTRAL')
+        confidence = analysis_data.get('confidence', 0) * 100
+        self.trading_log.add_log(f"Grok анализ {symbol}: {trend} ({confidence:.1f}%)", "info")
+    
+    def on_technical_analysis_result(self, symbol, technical_data, grok_data, decision):
+        """Обработка результатов технического анализа с обновлением фильтров"""
+        self.technical_analysis_widget.update_analysis(symbol, technical_data, grok_data, decision)
+        
+        self.filter_analysis_widget.update_filter_analysis(
+            symbol, technical_data, grok_data, decision
+        )
+    
+    def show_demo_data(self):
+        """Показ демо-данных когда бот не запущен"""
+        demo_data = {
+            'total_balance': 0.0,
+            'available_balance': 0.0,
+            'unrealized_pnl': 0.0,
+            'positions_count': 0,
+            'orders_count': 0,
+            'daily_trades': "0/0",
+            'total_trades': 0,
+            'next_analysis': "---",
+            'performance': 0.0
+        }
+        self.dashboard_tab.update_dashboard_data(demo_data)
+        self.positions_table.setRowCount(0)
+    
+    def show_settings(self):
+        """Переключение на вкладку настроек торговли"""
+        self.tabs.setCurrentIndex(2)
+        
+    def update_ui(self):
+        """Обновление интерфейса"""
+        try:
+            current_time = QDateTime.currentDateTime().toString("dd.MM.yyyy • hh:mm:ss")
+            self.update_time_label.setText(f"🕒 {current_time}")
+            
+        except Exception as e:
+            print(f"UI update error: {e}")
+    
+    def closeEvent(self, event):
+        """Обработчик закрытия окна"""
+        try:
+            if self.bot_worker and self.bot_worker.isRunning():
+                reply = QMessageBox.question(
+                    self, 
+                    "Подтверждение", 
+                    "Торговый бот все еще работает. Вы уверены, что хотите выйти?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                
+                if reply == QMessageBox.Yes:
+                    # Останавливаем бота перед закрытием
+                    self.stop_trading_bot()
+                    event.accept()
+                else:
+                    event.ignore()
+            else:
+                # Гарантируем что поток остановлен
+                if self.bot_worker:
+                    self.bot_worker.stop()
+                event.accept()
+        except Exception as e:
+            # В любом случае пытаемся остановить поток
+            if self.bot_worker:
+                self.bot_worker.stop()
+            event.accept()
+
+if __name__ == "__main__":
+    from PyQt5.QtWidgets import QApplication
+    import sys
+    
+    try:
+        app = QApplication(sys.argv)
+        
+        app.setStyleSheet("""
+            QMainWindow {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                          stop:0 #0F2027, stop:0.5 #203A43, stop:1 #2C5364);
+            }
+            
+            #glass-card {
+                background: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 15px;
+                padding: 20px;
+            }
+            
+            QPushButton {
+                background: rgba(86, 171, 255, 0.15);
+                color: #56ABFF;
+                border: 2px solid rgba(86, 171, 255, 0.3);
+                border-radius: 10px;
+                padding: 12px 18px;
+                font-weight: 700;
+                font-size: 14px;
+            }
+            
+            QPushButton:hover {
+                background: rgba(86, 171, 255, 0.25);
+                border: 2px solid rgba(86, 171, 255, 0.5);
+            }
+            
+            QPushButton#success {
+                background: rgba(0, 212, 170, 0.15);
+                color: #00D4AA;
+                border: 2px solid rgba(0, 212, 170, 0.3);
+            }
+            
+            QPushButton#success:hover {
+                background: rgba(0, 212, 170, 0.25);
+                border: 2px solid rgba(0, 212, 170, 0.5);
+            }
+            
+            QPushButton#danger {
+                background: rgba(255, 107, 107, 0.15);
+                color: #FF6B6B;
+                border: 2px solid rgba(255, 107, 107, 0.3);
+            }
+            
+            QPushButton#danger:hover {
+                background: rgba(255, 107, 107, 0.25);
+                border: 2px solid rgba(255, 107, 107, 0.5);
+            }
+            
+            QPushButton#secondary {
+                background: rgba(176, 176, 176, 0.1);
+                color: #B0B0B0;
+                border: 2px solid rgba(176, 176, 176, 0.2);
+            }
+            
+            QPushButton#secondary:hover {
+                background: rgba(176, 176, 176, 0.2);
+                border: 2px solid rgba(176, 176, 176, 0.3);
+            }
+            
+            #header-main {
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 28px;
+            }
+            
+            #header-sub {
+                color: #B0B0B0;
+                font-weight: 500;
+                font-size: 14px;
+            }
+            
+            #status-online {
+                color: #00D4AA;
+                font-weight: 700;
+                font-size: 16px;
+            }
+            
+            #status-offline {
+                color: #FF6B6B;
+                font-weight: 700;
+                font-size: 16px;
+            }
+        """)
+        
+        window = PremiumMainWindow()
+        window.show()
+        window.show_demo_data()
+        
+        sys.exit(app.exec_())
+        
+    except Exception as e:
+        print(f"Application error: {e}")
+        QMessageBox.critical(None, "Fatal Error", f"Application failed to start: {str(e)}")
