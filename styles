@@ -1,0 +1,241 @@
+# styles.py - ОБНОВЛЕННАЯ ВЕРСИЯ
+QT_STYLESHEET = """
+/* === PREMIUM RUSSIAN TRADING UI === */
+QMainWindow, QWidget {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                               stop:0 #0F0F23, stop:0.5 #1A1A2E, stop:1 #16213E);
+    color: #FFFFFF;
+    font-family: 'Segoe UI', 'Arial', sans-serif;
+    font-size: 15px;
+}
+/* === GLASS CARDS === */
+.glass-card {
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 20px;
+}
+.metric-card {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                               stop:0 rgba(86, 171, 255, 0.1), 
+                               stop:1 rgba(106, 76, 247, 0.08));
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 18px;
+}
+/* === BUTTONS === */
+QPushButton {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                               stop:0 #6A4CF7, stop:1 #56ABFF);
+    color: #FFFFFF;
+    border: none;
+    border-radius: 14px;
+    padding: 14px 22px;
+    font-weight: 600;
+    font-size: 16px;
+    min-height: 52px;
+    min-width: 130px;
+}
+QPushButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                               stop:0 #7A5CFF, stop:1 #66BBFF);
+}
+QPushButton.success {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                               stop:0 #00D4AA, stop:1 #00B894);
+    min-width: 150px;
+}
+QPushButton.danger {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                               stop:0 #FF6B6B, stop:1 #EE5A5A);
+    min-width: 150px;
+}
+QPushButton.secondary {
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #FFFFFF;
+    min-width: 130px;
+}
+/* === METRICS === */
+.metric-value-large {
+    font-size: 32px;  /* УВЕЛИЧЕНО С 28px */
+    font-weight: 700;
+    color: #FFFFFF;
+}
+.metric-value-medium {
+    font-size: 28px;
+    font-weight: 600;
+    color: #FFFFFF;
+}
+.metric-label {
+    font-size: 14px;
+    color: #B0B0B0;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.metric-change-positive {
+    font-size: 15px;
+    color: #00D4AA;
+    font-weight: 600;
+    background: rgba(0, 212, 170, 0.15);
+    padding: 6px 12px;
+    border-radius: 8px;
+}
+.metric-change-negative {
+    font-size: 15px;
+    color: #FF6B6B;
+    font-weight: 600;
+    background: rgba(255, 107, 107, 0.15);
+    padding: 6px 12px;
+    border-radius: 8px;
+}
+/* === STATUS INDICATORS === */
+.status-online {
+    color: #00D4AA;
+    font-weight: 600;
+    font-size: 16px;
+    background: rgba(0, 212, 170, 0.12);
+    padding: 10px 18px;
+    border-radius: 20px;
+}
+.status-offline {
+    color: #FF6B6B;
+    font-weight: 600;
+    font-size: 16px;
+    background: rgba(255, 107, 107, 0.12);
+    padding: 10px 18px;
+    border-radius: 20px;
+}
+/* === HEADER STYLES === */
+.header-main {
+    font-size: 32px;
+    font-weight: 700;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                               stop:0 #56ABFF, stop:0.5 #6A4CF7, stop:1 #00D4AA);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.header-sub {
+    font-size: 15px;
+    color: #B0B0B0;
+    font-weight: 500;
+}
+/* === TABS === */
+QTabWidget::pane {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.04);
+}
+QTabBar::tab {
+    background: transparent;
+    color: #B0B0B0;
+    padding: 14px 22px;
+    font-weight: 600;
+    font-size: 15px;
+    min-width: 130px;
+}
+QTabBar::tab:selected {
+    background: rgba(106, 76, 247, 0.18);
+    color: #6A4CF7;
+}
+/* === INPUTS === */
+QComboBox, QSpinBox, QDoubleSpinBox {
+    background: rgba(255, 255, 255, 0.09);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 10px;
+    padding: 12px 16px;
+    color: #FFFFFF;
+    font-size: 16px;
+    min-height: 48px;
+}
+/* === GROUP BOXES === */
+QGroupBox {
+    color: #FFFFFF;
+    font-weight: 600;
+    font-size: 17px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+}
+QGroupBox::title {
+    color: #56ABFF;
+    subcontrol-origin: margin;
+    left: 15px;
+    padding: 0 10px 0 10px;
+    font-size: 17px;
+}
+/* === LABELS === */
+QLabel {
+    color: #FFFFFF;
+    background: transparent;
+    font-size: 15px;
+}
+/* === LIST WIDGET === */
+QListWidget {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    color: #FFFFFF;
+    font-size: 14px;
+    outline: none;
+}
+QListWidget::item {
+    padding: 12px 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+QListWidget::item:selected {
+    background: rgba(86, 171, 255, 0.2);
+    border-radius: 8px;
+}
+QListWidget::item:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+}
+/* === SCROLL AREAS === */
+QScrollArea {
+    background: transparent;
+    border: none;
+}
+QScrollArea QWidget {
+    background: transparent;
+}
+/* === PROGRESS BARS === */
+QProgressBar {
+    border: none;
+    background: rgba(255, 255, 255, 0.09);
+    border-radius: 10px;
+    text-align: center;
+    color: white;
+    font-size: 13px;
+    font-weight: 500;
+    height: 10px;
+}
+QProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                               stop:0 #56ABFF, stop:0.5 #6A4CF7, stop:1 #00D4AA);
+    border-radius: 10px;
+}
+/* === CHECKBOX === */
+QCheckBox {
+    color: #FFFFFF;
+    font-size: 16px;
+    spacing: 12px;
+}
+QCheckBox::indicator {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #B0B0B0;
+    border-radius: 5px;
+    background: transparent;
+}
+QCheckBox::indicator:checked {
+    background: #6A4CF7;
+    border: 2px solid #6A4CF7;
+}
+/* === STATUS BAR === */
+QStatusBar {
+    background: rgba(255, 255, 255, 0.04);
+    color: #B0B0B0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 14px;
+}
+"""
